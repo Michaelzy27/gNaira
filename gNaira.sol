@@ -21,9 +21,6 @@ contract gNaira is ERC20Interface {
 
     address governor;
     address payable  multiSigAddress;
-    address selfContract;
-
-    bytes data;
 
     mapping(address => uint) balances;
     mapping(address => mapping(address =>uint)) allowed;
@@ -35,8 +32,8 @@ contract gNaira is ERC20Interface {
     }
 
     constructor() {
-        symbol = "tNGN";
-        name = "testNaira";
+        symbol = "gNGN";
+        name = "gNaira";
         decimals = 18;
         _totalSupply = 1_000_000_000_000_000_000_000_000; //initial supply set to 1 million tokens
         governor = msg.sender;
@@ -70,6 +67,9 @@ contract gNaira is ERC20Interface {
     }
 
     function transferFrom(address sender, address recipient, uint amount) public returns (bool success) {
+        require(amount <= balances[sender], "insufficient sender balance");
+        require(!isBlacklisted[sender], "sender is blacklisted and cannot send tokens");
+        require(!isBlacklisted[recipient], "recipient is blacklisted and cannot receive tokens");
         balances[sender] = balances[sender] - amount;
         allowed[sender][msg.sender] = allowed[sender][msg.sender] - amount;
         balances[recipient] = balances[recipient] + amount;
@@ -81,40 +81,54 @@ contract gNaira is ERC20Interface {
         return allowed[owner][spender];
     }
 
-    function mintTokens(uint amount, address minter) public  {
+
+    //this function can only be called by current governor to set a new governor
+    function setGovernor(address _governor) external isGovernor() {
+        governor = _governor;
+    }
+
+    function mintTokens(uint amount) public  {
         _totalSupply = _totalSupply + amount;
-        balances[minter] = balances[minter] + amount;
+        balances[governor] = balances[governor] + amount;
         //return true;
 
     }
 
+    /*this is only called by current governor address to submit new mint proposal which will
+    be sent to multisig for approval*/
     function submitMint(uint amount) external isGovernor() {
         MultiSig mSig = MultiSig(multiSigAddress);
-        mSig.submit(true, amount, msg.sender);
-
-        // _totalSupply = _totalSupply + amount;
-        // balances[minter] = balances[minter] + amount;
-        // //return true;
+        mSig.submit(true, amount);
 
     }
  
+    //this is called after deployment to set the contract address of the multisig wallet;
     function setMultiSigAddress(address payable _mSigAddress) public {
         multiSigAddress = _mSigAddress;
     }
 
-    function burnTokens(uint amount) external isGovernor() {
+    function burnTokens(uint amount) public {
         
         _totalSupply = _totalSupply - amount;
         balances[governor] = balances[governor] - amount;
         //return true;
     }
 
-    function burnTokensFrom(address to, uint amount) external isGovernor() {
-        _totalSupply = _totalSupply - amount;
-        balances[to] = balances[to] - amount;
-        //return true;
+    /*this is only called by current governor address to submit new burn proposal which will
+    be sent to multisig for approval*/
+    function submitBurn(uint amount) external isGovernor() {
+        MultiSig mSig = MultiSig(multiSigAddress);
+        mSig.submit(false, amount);
+
     }
 
+    // function burnTokensFrom(address to, uint amount) external isGovernor() {
+    //     _totalSupply = _totalSupply - amount;
+    //     balances[to] = balances[to] - amount;
+    //     //return true;
+    // }
+
+    //only governor address can blaclist addresses
     function blacklistUser(address user) external isGovernor() {
         require(!isBlacklisted[user], "user is already blacklisted");
         isBlacklisted[user] = true;
@@ -126,7 +140,7 @@ contract gNaira is ERC20Interface {
     }
 
     function getGovernor() public view returns (address) {
-        return governor;
+        return governor;      //returns current governor
     }
 }
 
@@ -137,16 +151,8 @@ contract MultiSig {
     event Revoke(address indexed admin, uint indexed txID);
     event Execute(uint indexed txID);
 
-    struct Transaction {
-        address to;
-        uint value;
-        bytes data;
-        bool executed;
-    }
-
     struct Proposal {
-        address user;
-        bool method;       // true is mint, false is burn
+        bool method;       // true is mint proposal, false is burn proposal
         uint value;
         bool executed;
     }
@@ -158,18 +164,12 @@ contract MultiSig {
     uint public required;
 
     Proposal[] public proposals;
-    Transaction[] public transactions;
     mapping(uint => mapping(address => bool)) public approved;
 
     modifier onlyAdmin() {
         require(isAdmin[msg.sender], "sender is not an admin");
         _;
     }
-
-    // modifier txExists(uint _txID) {
-    //     require(_txID < transactions.length, "transaction does not exist");
-    //     _;
-    // } 
 
     modifier txExists(uint _txID) {
         require(_txID < proposals.length, "transaction does not exist");
@@ -181,11 +181,6 @@ contract MultiSig {
         _;
     }
 
-    // modifier notExecuted(uint _txID) {
-    //     require(!transactions[_txID].executed, "transaction already executed");
-    //     _;
-    // }
-
     modifier notExecuted(uint _txID) {
         require(!proposals[_txID].executed, "transaction already executed");
         _;
@@ -193,8 +188,8 @@ contract MultiSig {
 
 //["0x634bC37172eCDD1Eb18Fb1C1f1E043006be5Cc60", "0x66D39d6dbA140b341e8B9e32f43042229ae66517"]
     constructor(address[] memory _admins, uint _required) {
-        require(_admins.length > 0, "at least two admins required");
-        require(_required > 0 && _required <= _admins.length, "invali required");
+        require(_admins.length > 0, "at least one admin required");
+        require(_required > 0 && _required <= _admins.length, "invalid required");
 
         for (uint i = 0; i < _admins.length; i++) {
             require(_admins[i] != address(0), "invalid adrress");
@@ -213,22 +208,12 @@ contract MultiSig {
         emit Deposit(msg.sender, msg.value);
     }
 
-    // function submit(address _to, uint _value, bytes calldata _data) public {
-    //     transactions.push(Transaction({
-    //         to: _to,
-    //         value: _value,
-    //         data: _data,
-    //         executed: false
-    //     }));
-    //     emit Submit(transactions.length - 1);
-    // }
-
     function setgNairaContractAddress(address _gNairaContract) public {
         gNairaContractAddress = _gNairaContract;
     }
 
-    function submit(bool _method, uint _value, address _minter) public {
-        Proposal memory newProposal = Proposal(_minter, _method, _value, false);
+    function submit(bool _method, uint _value) public {
+        Proposal memory newProposal = Proposal(_method, _value, false);
         proposals.push(newProposal);
         
         //emit Submit(transactions.length - 1);
@@ -248,29 +233,19 @@ contract MultiSig {
 
     }
 
-    // function execute(uint _txID) external txExists(_txID) notExecuted(_txID) {
-    //     require(getApprovalCount(_txID) >= required, "not enough approvals");
-    //     Transaction storage transaction = transactions[_txID];
-    //     transaction.executed = true;
-        
-    //     (bool success, ) = transaction.to.call{value: transaction.value}(
-    //         transaction.data
-    //     );
-    //     require(success, "transaction failed");
-    //     emit Execute(_txID);
-    // }
-
     function execute(uint _txID) external txExists(_txID) notExecuted(_txID) {  //isGovernor?
         require(getApprovalCount(_txID) >= required, "not enough approvals");
         Proposal storage proposal = proposals[_txID];
         proposal.executed = true;
 
+        gNaira g_naira = gNaira(gNairaContractAddress);
+
         if(proposal.method) {
-            testNaira tNaira = testNaira(gNairaContractAddress);
-            tNaira.mintTokens(proposal.value, proposal. user);
+            
+            g_naira.mintTokens(proposal.value);
 
         } else if(!proposal.method) {
-
+            g_naira.burnTokens(proposal.value);
         }
         
         // (bool success, ) = transaction.to.call{value: transaction.value}(
