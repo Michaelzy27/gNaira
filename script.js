@@ -68,7 +68,7 @@ async function mintTokens() {
     const _amount = document.getElementById("mintamount").value;
 
     try {
-        await contract.methods.submitMint(_amount).send({from: account});
+        await contract.methods.mintTokens(_amount, account).send({from: account});
         alert("mint successful")
     } catch(error) {
         console.log(error);
@@ -99,8 +99,42 @@ async function burnTokens() {
     const _amount = document.getElementById("burnamount").value;
 
     try {
-        await contract.methods.submitBurn(_amount).send({from: account});
+        await contract.methods.mintTokens(_amount, account).send({from: account});
         alert("burn successful")
+    } catch(error) {
+        console.log(error);
+
+    }
+}
+
+async function blacklist() {
+    if(contract == null) {
+        console.error("Contract does not exist!");
+        return;
+    }
+
+    const _address = document.getElementById("blacklistaddress").value;
+
+    try {
+        await contract.methods.blacklistUser(_address).send({from: account});
+        alert("blacklist successful")
+    } catch(error) {
+        console.log(error);
+
+    }
+}
+
+async function unBlacklist() {
+    if(contract == null) {
+        console.error("Contract does not exist!");
+        return;
+    }
+
+    const _address = document.getElementById("unblacklistaddress").value;
+
+    try {
+        await contract.methods.removeBlacklist(_address).send({from: account});
+        alert("unblacklist successful")
     } catch(error) {
         console.log(error);
 
