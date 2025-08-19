@@ -68,7 +68,7 @@ async function mintTokens() {
     const _amount = document.getElementById("mintamount").value;
 
     try {
-        await contract.methods.mintTokens(_amount, account).send({from: account});
+        await contract.methods.mintTokens(_amount).send({from: account});
         alert("mint successful")
     } catch(error) {
         console.log(error);
